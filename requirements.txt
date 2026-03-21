@@ -1,0 +1,14 @@
+# Core math and array operations
+numpy
+
+# Numerical solvers (for fsolve)
+scipy
+
+# Plotting and data visualization (for sensitivity analysis)
+matplotlib
+
+# Jupyter Notebook environment
+notebook
+
+# Data manipulation (highly recommended for organizing your plot data)
+pandas
