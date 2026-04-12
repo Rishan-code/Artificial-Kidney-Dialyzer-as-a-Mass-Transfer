@@ -1,14 +1,15 @@
 # src/mass_transfer.py
 import numpy as np
-from parameters import *
-
+try:
+    from .parameters import *
+except ImportError:
+    from parameters import *
 
 def calculate_area():
     """Calculates the total membrane surface area."""
     return n_fibers * np.pi * d_i * L
 
-
-def calculate_diffusivities():
+def calculate_diffusivities(r_s):
     """
     Uses the Stokes-Einstein equation to calculate free-water diffusivity,
     and structural parameters to calculate effective membrane diffusivity.
@@ -17,10 +18,26 @@ def calculate_diffusivities():
     D_water = (kb_boltzmann * T_kelvin) / (6 * np.pi * mu_water * r_s)
 
     # 2. Membrane Diffusivity based on polymer structure
-    D_m = D_water * (porosity / tortuosity)
+    # Include Steric Hindrance for larger molecules (Renkin equation approximation)
+    lambda_ratio = r_s / pore_radius
+    if lambda_ratio >= 1.0:
+        steric_hindrance = 1e-12 # Essentially zero but avoid divide by zero later
+    else:
+        steric_hindrance = (1 - lambda_ratio)**2
+        
+    D_m = D_water * (porosity / tortuosity) * steric_hindrance
 
     return D_water, D_m
 
+def calculate_sieving_coefficient(r_s):
+    """
+    Calculates sieving coefficient (S) for convection based on steric hindrance.
+    Simplified Ferry equation. S = 1 for water/very small solutes, 0 for proteins.
+    """
+    lambda_ratio = r_s / pore_radius
+    if lambda_ratio >= 1.0:
+        return 0.0
+    return (1 - lambda_ratio)**2 * (2 - (1 - lambda_ratio)**2)
 
 def calculate_kb(Q_b_m3_s, D_blood):
     """
@@ -40,7 +57,6 @@ def calculate_kb(Q_b_m3_s, D_blood):
     Sc = mu_blood / (rho_blood * D_blood)
 
     # Leveque solution for Sherwood number in developing laminar pipe flow
-    # Graetz number (Gz) = Re * Sc * (d_i / L)
     Gz = Re * Sc * (d_i / L)
 
     if Gz > 10:
@@ -57,14 +73,17 @@ def calculate_kd(Q_d_m3_s, D_dialysate):
     Calculates the dialysate-side mass transfer coefficient (k_d).
     Uses a simplified empirical correlation for shell-side flow.
     """
-    # Assume dialysate properties are close to water
     rho_d = 993.0
     mu_d = mu_water
 
-    # Superficial velocity on the shell side (simplified assumption)
-    # Assuming a shell diameter roughly wrapping the fiber bundle
+    # Superficial velocity on the shell side
     D_shell = np.sqrt(n_fibers) * d_i * 1.5
     A_shell = (np.pi / 4) * (D_shell ** 2) - (n_fibers * np.pi * (d_i / 2) ** 2)
+    
+    # Avoid zero division if Q_d is 0
+    if Q_d_m3_s <= 0:
+        return 1e-10
+        
     velocity_d = Q_d_m3_s / A_shell
 
     Re_d = (rho_d * velocity_d * d_i) / mu_d
@@ -77,14 +96,14 @@ def calculate_kd(Q_d_m3_s, D_dialysate):
     return k_d
 
 
-def calculate_overall_Ko(Q_b_m3_s, Q_d_m3_s):
+def calculate_overall_Ko(Q_b_m3_s, Q_d_m3_s, r_s):
     """
     Master function to calculate the overall mass transfer coefficient (K_o).
     """
-    D_water, D_m = calculate_diffusivities()
+    D_water, D_m = calculate_diffusivities(r_s)
 
     k_b = calculate_kb(Q_b_m3_s, D_water)
-    k_d = calculate_kd(Q_d_m3_s, D_water)  # Assuming dialysate D is similar to water
+    k_d = calculate_kd(Q_d_m3_s, D_water)
 
     # Resistance-in-series
     R_blood = 1 / k_b

@@ -1,9 +1,14 @@
 # src/parameters.py
 import numpy as np
 
-# --- 1. Solute Properties (Variable Solute: Urea) ---
-Mw = 60.06              # Molecular weight (g/mol)
-r_s = 2.6e-10           # Stokes radius of the molecule (meters)
+# --- 1. Solute Properties ---
+# Dictionary of solutes to simulate: Name -> {'Mw': g/mol, 'r_s': Stokes radius in m}
+SOLUTES = {
+    'Urea': {'Mw': 60.06, 'r_s': 2.6e-10},
+    'VitB12': {'Mw': 1355.0, 'r_s': 8.5e-10}, # Middle molecule
+    'Albumin': {'Mw': 66000.0, 'r_s': 35.8e-10} # Large protein
+}
+
 protein_bound = 0.0     # Fraction of solute bound to large proteins (0 to 1)
 
 # --- 2. Polymer Membrane Structural Variables ---
@@ -23,11 +28,18 @@ Hct = 0.40              # Hematocrit (40% red blood cells)
 # Flow rates (converted to m^3/s)
 Q_b_ml_min = 300
 Q_d_ml_min = 500
+Q_uf_ml_min = 10.0      # Ultrafiltration rate (water removal)
+
 Q_b = Q_b_ml_min * (1e-6 / 60)
 Q_d = Q_d_ml_min * (1e-6 / 60)
+Q_uf = Q_uf_ml_min * (1e-6 / 60)
 
 # Inlet concentrations (mg/mL)
-C_b_in = 1.5
+C_b_in = {
+    'Urea': 1.5,
+    'VitB12': 0.02,
+    'Albumin': 40.0
+}
 C_d_in = 0.0
 
 # --- Base physical constants for calculations ---

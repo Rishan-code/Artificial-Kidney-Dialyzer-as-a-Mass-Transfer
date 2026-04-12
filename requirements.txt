@@ -1,7 +1,7 @@
 # Core math and array operations
 numpy
 
-# Numerical solvers (for fsolve)
+# Numerical solvers (for fsolve and solve_bvp)
 scipy
 
 # Plotting and data visualization (for sensitivity analysis)
@@ -12,3 +12,7 @@ notebook
 
 # Data manipulation (highly recommended for organizing your plot data)
 pandas
+
+# Machine Learning and Progress Bars
+scikit-learn
+tqdm
