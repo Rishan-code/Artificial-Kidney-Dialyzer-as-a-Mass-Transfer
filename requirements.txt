@@ -16,3 +16,8 @@ pandas
 # Machine Learning and Progress Bars
 scikit-learn
 tqdm
+
+seaborn
+
+# Interactive Web GUI
+streamlit
