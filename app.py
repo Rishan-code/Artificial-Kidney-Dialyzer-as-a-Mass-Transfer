@@ -412,11 +412,12 @@ for i, (name, res) in enumerate(results.items()):
     cols[i+2].metric(solute_labels[name], f"{K:.1f} mL/min")
 
 # ── tabs ─────────────────────────────────────────────────────────
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "Concentration Profiles",
     "Operating Diagram & Equilibrium",
     "Resistance Breakdown",
     "Equations & Theory",
+    "How It Works",
 ])
 
 with tab1:
@@ -537,5 +538,167 @@ $$K = \\frac{Q_{b,in} C_{b,in} - Q_{b,out} C_{b,out}}{C_{b,in}}$$
 
 $$LMCD = \\frac{\\Delta C_1 - \\Delta C_2}{\\ln(\\Delta C_1 / \\Delta C_2)}$$
 
+</div>
+""", unsafe_allow_html=True)
+
+with tab5:
+    st.markdown("### How the Hemodialyzer Works")
+    st.markdown("---")
+
+    # ── 1. Device Schematic ──
+    st.markdown("""
+<div class="equation-box">
+<h4>1. The Device &mdash; Counter-Current Hollow Fiber Dialyzer</h4>
+<p>The dialyzer is a <strong>shell-and-tube</strong> device. Blood flows <em>inside</em> 10,000 tiny
+hollow fibers. Dialysate (cleaning fluid) flows <em>outside</em> the fibers in the opposite
+direction (counter-current).</p>
+<pre style="color:#7AA2F7; font-size:0.85rem; line-height:1.6; background:#0F1117; padding:16px; border-radius:8px; overflow-x:auto;">
+          BLOOD IN (dirty)                                BLOOD OUT (clean)
+          Qb = 300 mL/min                                Qb - Quf = 290 mL/min
+                |                                               |
+                v                                               v
+               z=0               Hollow Fibers                 z=L
+                    +---------------------------------------+
+                    |  o  o  o  o  o  o  o  o  o  o  o  o   |
+                    |  o  o  o  o  o  o  o  o  o  o  o  o   | &lt;-- 10,000 parallel
+                    |  o  o  o  o  o  o  o  o  o  o  o  o   |     fibers (200um ID)
+                    |  o  o  o  o  o  o  o  o  o  o  o  o   |
+                    +---------------------------------------+
+                ^                                               ^
+                |                                               |
+          DIALYSATE OUT                                   DIALYSATE IN
+          Qd + Quf = 510 mL/min                          Qd = 500 mL/min
+          (carries away waste                             (fresh, clean)
+           + removed water)
+</pre>
+<p style="color:#9CA3AF; font-size:0.85rem;">
+Counter-current flow maintains the concentration driving force (C<sub>b</sub> - C<sub>d</sub>)
+along the <em>entire</em> fiber length, maximizing mass transfer &mdash; same principle as
+a counter-current heat exchanger.
+</p>
+</div>
+""", unsafe_allow_html=True)
+
+    # ── 2. Membrane Selectivity ──
+    st.markdown("""
+<div class="equation-box">
+<h4>2. Membrane Pore Selectivity &mdash; Why Albumin Can't Pass</h4>
+<p>The fiber walls are <strong>porous polymer membranes</strong> with an average pore radius of
+<strong>3 nm</strong>. Molecules can only pass through if they are smaller than the pore.</p>
+<pre style="color:#7AA2F7; font-size:0.85rem; line-height:1.7; background:#0F1117; padding:16px; border-radius:8px; overflow-x:auto;">
+  BLOOD SIDE           Membrane Wall (40 um)           DIALYSATE SIDE
+
+                  +-----------------------------------+
+                  |    [ ]    [ ]    [ ]               |
+  Urea            |    [ ] -&gt; [ ] -&gt; [ ]  -&gt;  PASS    |   r = 0.26 nm
+  (60 Da)         |    [ ]    [ ]    [ ]               |   (12x smaller than pore)
+                  |                                     |
+                  |    [=]    [=]    [=]               |
+  VitB12          |    [=] -&gt; [=] -&gt; [=]  -&gt;  SQUEEZE |   r = 0.85 nm
+  (1,355 Da)      |    [=]    [=]    [=]               |   (3.5x smaller, friction)
+                  |                                     |
+                  |    [###]                            |
+  Albumin         |    [###] -&gt; X    BLOCKED!          |   r = 3.58 nm
+  (66,000 Da)     |    [###]                            |   (BIGGER than 3nm pore!)
+                  +-----------------------------------+
+                           Pore radius = 3 nm
+</pre>
+<table class="styled-table" style="margin-top:12px">
+<thead><tr><th>Solute</th><th>Radius</th><th>vs Pore (3 nm)</th><th>Sieving (S)</th><th>Result</th></tr></thead>
+<tbody>
+<tr><td>Urea</td><td>0.26 nm</td><td>12x smaller</td><td>0.97</td><td>Passes freely</td></tr>
+<tr><td>Vitamin B12</td><td>0.85 nm</td><td>3.5x smaller</td><td>0.76</td><td>Partial hindrance</td></tr>
+<tr><td>Albumin</td><td>3.58 nm</td><td>Bigger!</td><td>0.00</td><td>Fully blocked</td></tr>
+</tbody>
+</table>
+</div>
+""", unsafe_allow_html=True)
+
+    # ── 3. Three Resistances ──
+    st.markdown("""
+<div class="equation-box">
+<h4>3. Three Resistances in Series &mdash; What Limits Mass Transfer?</h4>
+<p>Solute must cross three layers to go from bulk blood to bulk dialysate.
+Each layer adds resistance &mdash; identical to thermal resistances in a heat exchanger.</p>
+<pre style="color:#7AA2F7; font-size:0.85rem; line-height:1.7; background:#0F1117; padding:16px; border-radius:8px; overflow-x:auto;">
+     BLOOD (bulk)         MEMBRANE (porous wall)       DIALYSATE (bulk)
+     ~~~~~~~~~~~         |                   |         ~~~~~~~~~~~
+                   \     |                   |       /
+  C_b  ~~~~~~~~~~~~~\    |                   |      /~~~~~~~~~~~~~ C_d
+                     \---+-------------------+----/
+                     |   |                   |   |
+                  &lt;-kb-&gt; &lt;------d/Dm--------&gt; &lt;-kd-&gt;
+                  blood     membrane wall      dialysate
+                  film      resistance         film
+
+                  1/Ko  =  1/kb  +  d/Dm  +  1/kd
+</pre>
+<table class="styled-table" style="margin-top:12px">
+<thead><tr><th>Resistance Layer</th><th>What Controls It</th><th>How to Reduce It</th></tr></thead>
+<tbody>
+<tr><td>Blood film (1/k<sub>b</sub>)</td><td>Blood flow velocity, fiber diameter</td><td>Increase Q<sub>b</sub></td></tr>
+<tr><td>Membrane (d/D<sub>m</sub>)</td><td>Porosity, tortuosity, pore size</td><td>Better membrane material</td></tr>
+<tr><td>Dialysate film (1/k<sub>d</sub>)</td><td>Dialysate flow velocity</td><td>Increase Q<sub>d</sub></td></tr>
+</tbody>
+</table>
+<p style="color:#9CA3AF; font-size:0.85rem; margin-top:10px;">
+For small molecules (Urea): membrane resistance dominates at ~69%.
+For large molecules (Albumin): membrane is 100% &mdash; complete rejection.
+</p>
+</div>
+""", unsafe_allow_html=True)
+
+    # ── 4. Flow Balance ──
+    st.markdown("""
+<div class="equation-box">
+<h4>4. Flow Balance &mdash; How Q<sub>b</sub>, Q<sub>d</sub>, and Q<sub>uf</sub> Connect</h4>
+<p>Ultrafiltration (Q<sub>uf</sub>) removes water from blood across the membrane.
+This causes flow rates to <strong>change along the fiber length</strong>.</p>
+<pre style="color:#7AA2F7; font-size:0.85rem; line-height:1.7; background:#0F1117; padding:16px; border-radius:8px; overflow-x:auto;">
+            Qb = 300 mL/min
+            ==========================================&gt;
+  BLOOD:    Cb_in = 1.5 mg/mL           Cb_out = 0.42 mg/mL
+            ==========================================
+                   |  diffusion (Ko x dC)  |    MAIN mechanism
+                   |  convection (Quf x S) |    BONUS mechanism
+            ==========================================
+  DIALYS:   Cd_out = 0.64 mg/mL         Cd_in = 0 mg/mL
+            &lt;==========================================
+            Qd = 500 mL/min
+
+                   Quf = 10 mL/min of water
+                   moves from blood --&gt; dialysate
+
+  Along the fiber:
+    Qb(z) = 300 - 10 x (z/L)     blood loses water, slows down
+    Qd(z) = 500 + 10 x (L-z)/L   dialysate gains water, speeds up
+</pre>
+<p style="color:#9CA3AF; font-size:0.85rem;">
+Over a 4-hour dialysis session at Q<sub>uf</sub> = 10 mL/min, total water removed = 2.4 liters.
+</p>
+</div>
+""", unsafe_allow_html=True)
+
+    # ── 5. Equilibrium Analogy ──
+    st.markdown("""
+<div class="equation-box">
+<h4>5. Separation Process Analogy &mdash; Operating Diagram</h4>
+<p>In distillation, you plot a y-x (McCabe-Thiele) diagram with an equilibrium curve
+and operating lines. In our dialyzer, the same concept applies:</p>
+<table class="styled-table" style="margin-top:8px; margin-bottom:12px;">
+<thead><tr><th>Standard Separation</th><th>Dialyzer Analog</th></tr></thead>
+<tbody>
+<tr><td>Distillation column / Absorber</td><td>Hollow-fiber dialyzer</td></tr>
+<tr><td>Vapor / Liquid phases</td><td>Blood / Dialysate phases</td></tr>
+<tr><td>y-x diagram (McCabe-Thiele)</td><td>C<sub>b</sub> vs C<sub>d</sub> operating diagram</td></tr>
+<tr><td>Equilibrium curve y* = f(x)</td><td>Equilibrium line C<sub>b</sub> = C<sub>d</sub> (45 degrees)</td></tr>
+<tr><td>Operating lines</td><td>ODE solutions (Cb(z), Cd(z))</td></tr>
+<tr><td>LMTD (heat exchanger)</td><td>LMCD (concentration difference)</td></tr>
+<tr><td>Overall heat transfer coeff U</td><td>Overall mass transfer coeff K<sub>o</sub></td></tr>
+</tbody>
+</table>
+<p>The <strong>gap</strong> between the operating curve and the 45-degree equilibrium
+line represents the <strong>local driving force</strong> for mass transfer at each position
+along the fiber. A larger gap means faster solute removal.</p>
 </div>
 """, unsafe_allow_html=True)
