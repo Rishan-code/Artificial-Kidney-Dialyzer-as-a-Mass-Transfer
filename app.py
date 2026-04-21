@@ -348,10 +348,10 @@ st.markdown("""
     /* tooltips / help icons */
     [data-testid="stTooltipIcon"] { color: #7AA2F7 !important; }
 
-    /* hide streamlit branding */
+    /* hide streamlit branding but keep sidebar toggle */
     #MainMenu { visibility: hidden; }
     footer { visibility: hidden; }
-    header { visibility: hidden; }
+    header [data-testid="stHeader"] { background: #0F1117 !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -417,7 +417,7 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "Operating Diagram & Equilibrium",
     "Resistance Breakdown",
     "Equations & Theory",
-    "How It Works",
+    "ML Surrogate Model",
 ])
 
 with tab1:
@@ -542,163 +542,182 @@ $$LMCD = \\frac{\\Delta C_1 - \\Delta C_2}{\\ln(\\Delta C_1 / \\Delta C_2)}$$
 """, unsafe_allow_html=True)
 
 with tab5:
-    st.markdown("### How the Hemodialyzer Works")
-    st.markdown("---")
+    st.markdown("### Digital Twin — ML Surrogate Model")
+    st.markdown(
+        "> A **Random Forest** is trained on 1,000 ODE solver runs to predict clearance instantly. "
+        "This acts as a **digital twin** — a fast surrogate that replaces the expensive BVP solver."
+    )
 
-    # ── 1. Device Schematic ──
-    st.markdown("""
+    # ── train / load model ─────────────────────────────────────────
+    import pandas as pd
+    from sklearn.ensemble import RandomForestRegressor
+    from sklearn.model_selection import train_test_split
+    from sklearn.metrics import (mean_absolute_error,
+                                 root_mean_squared_error,
+                                 mean_absolute_percentage_error)
+
+    @st.cache_resource(show_spinner="Training ML surrogate model...")
+    def get_ml_results():
+        csv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "data", "dialyzer_dataset.csv")
+        if not os.path.exists(csv_path):
+            st.error("Dataset not found. Run `python src/ml_model.py` first.")
+            return None
+
+        df = pd.read_csv(csv_path)
+        X = df[["Qb_ml_min", "Qd_ml_min", "Quf_ml_min"]]
+        y = df[["Clearance_Urea", "Clearance_B12"]]
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.2, random_state=42)
+
+        model = RandomForestRegressor(n_estimators=100, random_state=42)
+        model.fit(X_train, y_train)
+        y_pred = model.predict(X_test)
+
+        return {
+            "model": model,
+            "X_test": X_test, "y_test": y_test, "y_pred": y_pred,
+            "features": X.columns.tolist(),
+        }
+
+    ml = get_ml_results()
+
+    if ml is not None:
+        y_test = ml["y_test"]
+        y_pred = ml["y_pred"]
+
+        # ── compute metrics ──
+        solutes_ml = ["Urea", "VitB12"]
+        metrics = {}
+        for i, sol in enumerate(solutes_ml):
+            yt = y_test.iloc[:, i].values
+            yp = y_pred[:, i]
+            metrics[sol] = {
+                "MAE":  mean_absolute_error(yt, yp),
+                "RMSE": root_mean_squared_error(yt, yp),
+                "MAPE": mean_absolute_percentage_error(yt, yp) * 100,
+                "Max Error": np.max(np.abs(yt - yp)),
+                "yt": yt, "yp": yp,
+            }
+
+        # ── metric cards ──
+        st.markdown("#### Model Performance Metrics")
+        mc1, mc2 = st.columns(2)
+        for col, sol in zip([mc1, mc2], solutes_ml):
+            m = metrics[sol]
+            with col:
+                st.markdown(f"**{sol} Clearance**")
+                r1, r2, r3, r4 = st.columns(4)
+                r1.metric("MAE", f"{m['MAE']:.2f} mL/min")
+                r2.metric("RMSE", f"{m['RMSE']:.2f} mL/min")
+                r3.metric("MAPE", f"{m['MAPE']:.2f}%")
+                r4.metric("Max Err", f"{m['Max Error']:.2f} mL/min")
+
+        st.markdown("---")
+
+        # ── 1. Actual vs Predicted ──
+        st.markdown("#### Actual vs Predicted Clearance")
+        fig_avp, axes_avp = plt.subplots(1, 2, figsize=(14, 5.5))
+        for ax, sol in zip(axes_avp, solutes_ml):
+            m = metrics[sol]
+            yt, yp = m["yt"], m["yp"]
+            color = COLORS.get(sol, COLORS["Urea"])["blood"]
+            ax.scatter(yt, yp, alpha=0.5, s=25, color=color, edgecolors="white",
+                       linewidths=0.3, zorder=3)
+            mn, mx = min(yt.min(), yp.min()), max(yt.max(), yp.max())
+            pad = (mx - mn) * 0.05
+            ax.plot([mn-pad, mx+pad], [mn-pad, mx+pad], "--", color=EQUIL,
+                    lw=2, alpha=0.8, label="Perfect prediction")
+            ax.set_xlabel("ODE Solver (Actual) [mL/min]", fontsize=10)
+            ax.set_ylabel("Random Forest (Predicted) [mL/min]", fontsize=10)
+            ax.set_title(f"{sol} — MAE={m['MAE']:.2f}, RMSE={m['RMSE']:.2f}",
+                         fontsize=12, fontweight="bold")
+            ax.legend(fontsize=9, loc="upper left", framealpha=0.6,
+                      facecolor=PANEL, edgecolor=GRID, labelcolor=TXT)
+            ax.grid(True, linewidth=0.5)
+        fig_avp.tight_layout()
+        st.pyplot(fig_avp, use_container_width=True)
+
+        # ── 2. Residual Distribution ──
+        st.markdown("#### Prediction Error Distribution")
+        fig_res, axes_res = plt.subplots(1, 2, figsize=(14, 4.5))
+        for ax, sol in zip(axes_res, solutes_ml):
+            m = metrics[sol]
+            errors = m["yt"] - m["yp"]
+            color = COLORS.get(sol, COLORS["Urea"])["blood"]
+            ax.hist(errors, bins=30, color=color, alpha=0.7,
+                    edgecolor=BG, linewidth=0.8)
+            ax.axvline(0, color=EQUIL, ls="--", lw=2, alpha=0.8)
+            ax.axvline(errors.mean(), color=ACCENT, ls=":", lw=2, alpha=0.8)
+            ax.text(0.97, 0.95,
+                    f"Mean err = {errors.mean():.3f}\nStd = {errors.std():.3f}",
+                    transform=ax.transAxes, ha="right", va="top", fontsize=9,
+                    fontweight="bold", color=TXT,
+                    bbox=dict(boxstyle="round,pad=0.3", fc=BG, ec=ACCENT, alpha=0.85))
+            ax.set_xlabel("Error: Actual - Predicted (mL/min)", fontsize=10)
+            ax.set_ylabel("Count", fontsize=10)
+            ax.set_title(f"{sol} — Residual Distribution",
+                         fontsize=12, fontweight="bold")
+            ax.grid(True, linewidth=0.5)
+        fig_res.tight_layout()
+        st.pyplot(fig_res, use_container_width=True)
+
+        # ── 3. Feature Importance ──
+        st.markdown("#### Feature Importance")
+        importances = ml["model"].feature_importances_
+        feature_labels = ["Blood Flow (Qb)", "Dialysate Flow (Qd)",
+                          "Ultrafiltration (Quf)"]
+
+        # get per-target importance if available
+        fig_imp, ax_imp = plt.subplots(figsize=(10, 4))
+        x_pos = np.arange(len(feature_labels))
+        bar_colors = ["#E63946", "#457B9D", "#2A9D8F"]
+
+        # average importance across both targets
+        per_target_imp = np.array([tree.feature_importances_
+                                   for tree in ml["model"].estimators_])
+        mean_imp = per_target_imp.mean(axis=0)
+        std_imp = per_target_imp.std(axis=0)
+
+        bars = ax_imp.bar(x_pos, mean_imp, yerr=std_imp, capsize=6,
+                          color=bar_colors, edgecolor=BG, linewidth=1.5,
+                          alpha=0.85, zorder=3)
+        for bar, val in zip(bars, mean_imp):
+            ax_imp.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 0.02,
+                        f"{val:.3f}", ha="center", va="bottom", fontsize=11,
+                        fontweight="bold", color=TXT)
+        ax_imp.set_xticks(x_pos)
+        ax_imp.set_xticklabels(feature_labels, fontsize=11)
+        ax_imp.set_ylabel("Importance (mean +/- std across trees)", fontsize=10)
+        ax_imp.set_title("Random Forest Feature Importance",
+                         fontsize=13, fontweight="bold")
+        ax_imp.set_ylim(0, max(mean_imp) * 1.25)
+        ax_imp.grid(True, axis="y", linewidth=0.5)
+        fig_imp.tight_layout()
+        st.pyplot(fig_imp, use_container_width=True)
+
+        # ── explanation ──
+        st.markdown("""
 <div class="equation-box">
-<h4>1. The Device &mdash; Counter-Current Hollow Fiber Dialyzer</h4>
-<p>The dialyzer is a <strong>shell-and-tube</strong> device. Blood flows <em>inside</em> 10,000 tiny
-hollow fibers. Dialysate (cleaning fluid) flows <em>outside</em> the fibers in the opposite
-direction (counter-current).</p>
-<pre style="color:#7AA2F7; font-size:0.85rem; line-height:1.6; background:#0F1117; padding:16px; border-radius:8px; overflow-x:auto;">
-          BLOOD IN (dirty)                                BLOOD OUT (clean)
-          Qb = 300 mL/min                                Qb - Quf = 290 mL/min
-                |                                               |
-                v                                               v
-               z=0               Hollow Fibers                 z=L
-                    +---------------------------------------+
-                    |  o  o  o  o  o  o  o  o  o  o  o  o   |
-                    |  o  o  o  o  o  o  o  o  o  o  o  o   | &lt;-- 10,000 parallel
-                    |  o  o  o  o  o  o  o  o  o  o  o  o   |     fibers (200um ID)
-                    |  o  o  o  o  o  o  o  o  o  o  o  o   |
-                    +---------------------------------------+
-                ^                                               ^
-                |                                               |
-          DIALYSATE OUT                                   DIALYSATE IN
-          Qd + Quf = 510 mL/min                          Qd = 500 mL/min
-          (carries away waste                             (fresh, clean)
-           + removed water)
-</pre>
+<h4>How the Surrogate Model Works</h4>
+<p>1. The rigorous ODE solver was run <strong>1,000 times</strong> with randomly sampled operating
+conditions (Qb: 200-500, Qd: 300-800, Quf: 0-20 mL/min).</p>
+<p>2. A <strong>Random Forest Regressor</strong> (100 trees) was trained on 80% of the data to predict
+Urea and VitB12 clearance from the three operating parameters.</p>
+<p>3. The model is evaluated on the held-out 20% test set using:</p>
+<table class="styled-table" style="margin:10px 0;">
+<thead><tr><th>Metric</th><th>What It Measures</th><th>Why Not R&sup2;?</th></tr></thead>
+<tbody>
+<tr><td><strong>MAE</strong></td><td>Average absolute error in mL/min</td><td>Directly interpretable in physical units</td></tr>
+<tr><td><strong>RMSE</strong></td><td>Root mean squared error &mdash; penalizes large errors</td><td>Sensitive to outliers, more conservative</td></tr>
+<tr><td><strong>MAPE</strong></td><td>Percentage error relative to actual value</td><td>Scale-independent, shows relative accuracy</td></tr>
+<tr><td><strong>Max Error</strong></td><td>Worst-case single prediction error</td><td>Important for safety-critical applications</td></tr>
+</tbody>
+</table>
 <p style="color:#9CA3AF; font-size:0.85rem;">
-Counter-current flow maintains the concentration driving force (C<sub>b</sub> - C<sub>d</sub>)
-along the <em>entire</em> fiber length, maximizing mass transfer &mdash; same principle as
-a counter-current heat exchanger.
+The ODE solver takes ~0.5s per run. The ML surrogate predicts in microseconds &mdash;
+enabling real-time optimization and control applications.
 </p>
 </div>
 """, unsafe_allow_html=True)
 
-    # ── 2. Membrane Selectivity ──
-    st.markdown("""
-<div class="equation-box">
-<h4>2. Membrane Pore Selectivity &mdash; Why Albumin Can't Pass</h4>
-<p>The fiber walls are <strong>porous polymer membranes</strong> with an average pore radius of
-<strong>3 nm</strong>. Molecules can only pass through if they are smaller than the pore.</p>
-<pre style="color:#7AA2F7; font-size:0.85rem; line-height:1.7; background:#0F1117; padding:16px; border-radius:8px; overflow-x:auto;">
-  BLOOD SIDE           Membrane Wall (40 um)           DIALYSATE SIDE
-
-                  +-----------------------------------+
-                  |    [ ]    [ ]    [ ]               |
-  Urea            |    [ ] -&gt; [ ] -&gt; [ ]  -&gt;  PASS    |   r = 0.26 nm
-  (60 Da)         |    [ ]    [ ]    [ ]               |   (12x smaller than pore)
-                  |                                     |
-                  |    [=]    [=]    [=]               |
-  VitB12          |    [=] -&gt; [=] -&gt; [=]  -&gt;  SQUEEZE |   r = 0.85 nm
-  (1,355 Da)      |    [=]    [=]    [=]               |   (3.5x smaller, friction)
-                  |                                     |
-                  |    [###]                            |
-  Albumin         |    [###] -&gt; X    BLOCKED!          |   r = 3.58 nm
-  (66,000 Da)     |    [###]                            |   (BIGGER than 3nm pore!)
-                  +-----------------------------------+
-                           Pore radius = 3 nm
-</pre>
-<table class="styled-table" style="margin-top:12px">
-<thead><tr><th>Solute</th><th>Radius</th><th>vs Pore (3 nm)</th><th>Sieving (S)</th><th>Result</th></tr></thead>
-<tbody>
-<tr><td>Urea</td><td>0.26 nm</td><td>12x smaller</td><td>0.97</td><td>Passes freely</td></tr>
-<tr><td>Vitamin B12</td><td>0.85 nm</td><td>3.5x smaller</td><td>0.76</td><td>Partial hindrance</td></tr>
-<tr><td>Albumin</td><td>3.58 nm</td><td>Bigger!</td><td>0.00</td><td>Fully blocked</td></tr>
-</tbody>
-</table>
-</div>
-""", unsafe_allow_html=True)
-
-    # ── 3. Three Resistances ──
-    st.markdown("""
-<div class="equation-box">
-<h4>3. Three Resistances in Series &mdash; What Limits Mass Transfer?</h4>
-<p>Solute must cross three layers to go from bulk blood to bulk dialysate.
-Each layer adds resistance &mdash; identical to thermal resistances in a heat exchanger.</p>
-<pre style="color:#7AA2F7; font-size:0.85rem; line-height:1.7; background:#0F1117; padding:16px; border-radius:8px; overflow-x:auto;">
-     BLOOD (bulk)         MEMBRANE (porous wall)       DIALYSATE (bulk)
-     ~~~~~~~~~~~         |                   |         ~~~~~~~~~~~
-                   \     |                   |       /
-  C_b  ~~~~~~~~~~~~~\    |                   |      /~~~~~~~~~~~~~ C_d
-                     \---+-------------------+----/
-                     |   |                   |   |
-                  &lt;-kb-&gt; &lt;------d/Dm--------&gt; &lt;-kd-&gt;
-                  blood     membrane wall      dialysate
-                  film      resistance         film
-
-                  1/Ko  =  1/kb  +  d/Dm  +  1/kd
-</pre>
-<table class="styled-table" style="margin-top:12px">
-<thead><tr><th>Resistance Layer</th><th>What Controls It</th><th>How to Reduce It</th></tr></thead>
-<tbody>
-<tr><td>Blood film (1/k<sub>b</sub>)</td><td>Blood flow velocity, fiber diameter</td><td>Increase Q<sub>b</sub></td></tr>
-<tr><td>Membrane (d/D<sub>m</sub>)</td><td>Porosity, tortuosity, pore size</td><td>Better membrane material</td></tr>
-<tr><td>Dialysate film (1/k<sub>d</sub>)</td><td>Dialysate flow velocity</td><td>Increase Q<sub>d</sub></td></tr>
-</tbody>
-</table>
-<p style="color:#9CA3AF; font-size:0.85rem; margin-top:10px;">
-For small molecules (Urea): membrane resistance dominates at ~69%.
-For large molecules (Albumin): membrane is 100% &mdash; complete rejection.
-</p>
-</div>
-""", unsafe_allow_html=True)
-
-    # ── 4. Flow Balance ──
-    st.markdown("""
-<div class="equation-box">
-<h4>4. Flow Balance &mdash; How Q<sub>b</sub>, Q<sub>d</sub>, and Q<sub>uf</sub> Connect</h4>
-<p>Ultrafiltration (Q<sub>uf</sub>) removes water from blood across the membrane.
-This causes flow rates to <strong>change along the fiber length</strong>.</p>
-<pre style="color:#7AA2F7; font-size:0.85rem; line-height:1.7; background:#0F1117; padding:16px; border-radius:8px; overflow-x:auto;">
-            Qb = 300 mL/min
-            ==========================================&gt;
-  BLOOD:    Cb_in = 1.5 mg/mL           Cb_out = 0.42 mg/mL
-            ==========================================
-                   |  diffusion (Ko x dC)  |    MAIN mechanism
-                   |  convection (Quf x S) |    BONUS mechanism
-            ==========================================
-  DIALYS:   Cd_out = 0.64 mg/mL         Cd_in = 0 mg/mL
-            &lt;==========================================
-            Qd = 500 mL/min
-
-                   Quf = 10 mL/min of water
-                   moves from blood --&gt; dialysate
-
-  Along the fiber:
-    Qb(z) = 300 - 10 x (z/L)     blood loses water, slows down
-    Qd(z) = 500 + 10 x (L-z)/L   dialysate gains water, speeds up
-</pre>
-<p style="color:#9CA3AF; font-size:0.85rem;">
-Over a 4-hour dialysis session at Q<sub>uf</sub> = 10 mL/min, total water removed = 2.4 liters.
-</p>
-</div>
-""", unsafe_allow_html=True)
-
-    # ── 5. Equilibrium Analogy ──
-    st.markdown("""
-<div class="equation-box">
-<h4>5. Separation Process Analogy &mdash; Operating Diagram</h4>
-<p>In distillation, you plot a y-x (McCabe-Thiele) diagram with an equilibrium curve
-and operating lines. In our dialyzer, the same concept applies:</p>
-<table class="styled-table" style="margin-top:8px; margin-bottom:12px;">
-<thead><tr><th>Standard Separation</th><th>Dialyzer Analog</th></tr></thead>
-<tbody>
-<tr><td>Distillation column / Absorber</td><td>Hollow-fiber dialyzer</td></tr>
-<tr><td>Vapor / Liquid phases</td><td>Blood / Dialysate phases</td></tr>
-<tr><td>y-x diagram (McCabe-Thiele)</td><td>C<sub>b</sub> vs C<sub>d</sub> operating diagram</td></tr>
-<tr><td>Equilibrium curve y* = f(x)</td><td>Equilibrium line C<sub>b</sub> = C<sub>d</sub> (45 degrees)</td></tr>
-<tr><td>Operating lines</td><td>ODE solutions (Cb(z), Cd(z))</td></tr>
-<tr><td>LMTD (heat exchanger)</td><td>LMCD (concentration difference)</td></tr>
-<tr><td>Overall heat transfer coeff U</td><td>Overall mass transfer coeff K<sub>o</sub></td></tr>
-</tbody>
-</table>
-<p>The <strong>gap</strong> between the operating curve and the 45-degree equilibrium
-line represents the <strong>local driving force</strong> for mass transfer at each position
-along the fiber. A larger gap means faster solute removal.</p>
-</div>
-""", unsafe_allow_html=True)
